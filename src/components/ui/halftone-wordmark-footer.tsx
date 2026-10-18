@@ -32,15 +32,21 @@ export default function HalftoneWordmarkFooter({
     const ctx = canvas.getContext('2d')
     if (!ctx) return
     let animation = 0
+    let narrowLayout = false
     let pointer = { x: -1000, y: -1000 }
     let shock = { x: 0, y: 0, start: -1 }
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    // Phones do not have a cursor to disturb the print, so give the wordmark a
+    // gentle autonomous "touch" that wanders across it instead.
+    const touchScreen = window.matchMedia('(hover: none), (pointer: coarse)').matches
 
     const draw = (now = performance.now()) => {
       const rect = root.getBoundingClientRect()
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       const width = Math.max(1, Math.round(rect.width))
       const heightPx = Math.max(1, Math.round(rect.height))
+      narrowLayout = width < 700
+      const autonomousMotion = touchScreen || narrowLayout
       if (canvas.width !== width * dpr || canvas.height !== heightPx * dpr) {
         canvas.width = width * dpr
         canvas.height = heightPx * dpr
@@ -61,15 +67,23 @@ export default function HalftoneWordmarkFooter({
       mctx.font = `800 ${finalSize}px Inter, Arial, sans-serif`
       const textWidth = mctx.measureText(wordmark).width
       mctx.fillStyle = '#fff'
-      mctx.fillText(wordmark, (width - textWidth) / 2, heightPx * 1.15)
+      // Keep the word deliberately cropped on desktop, but bring it fully into
+      // the phone footer so the automatic touch animation has a clear canvas.
+      mctx.fillText(wordmark, (width - textWidth) / 2, heightPx * (autonomousMotion ? 0.88 : 1.15))
       const pixels = mctx.getImageData(0, 0, width, heightPx).data
       const gap = width < 560 ? 7 : 8
+      const animatedPointer = autonomousMotion
+        ? {
+            x: width * (0.5 + 0.4 * Math.sin(now / 1250)),
+            y: heightPx * (0.73 + 0.13 * Math.sin(now / 900 + 1.2)),
+          }
+        : pointer
       for (let y = 0; y < heightPx; y += gap) for (let x = 0; x < width; x += gap) {
         const i = (Math.min(heightPx - 1, Math.round(y)) * width + Math.min(width - 1, Math.round(x))) * 4
         const coverage = pixels[i + 3] / 255
         if (coverage < 0.06) continue
-        const dx = x - pointer.x
-        const dy = y - pointer.y
+        const dx = x - animatedPointer.x
+        const dy = y - animatedPointer.y
         const distance = Math.hypot(dx, dy)
         const force = reducedMotion ? 0 : Math.max(0, 1 - distance / 95)
         const push = force * 18
@@ -80,7 +94,7 @@ export default function HalftoneWordmarkFooter({
         ctx.arc(x + (distance ? (dx / distance) * push : 0), y + (distance ? (dy / distance) * push : 0), Math.sqrt(coverage) * gap * 0.52, 0, Math.PI * 2)
         ctx.fill()
       }
-      if (!reducedMotion && (pointer.x > -900 || (shock.start >= 0 && now - shock.start < 900))) animation = requestAnimationFrame(draw)
+      if (!reducedMotion && (touchScreen || narrowLayout || pointer.x > -900 || (shock.start >= 0 && now - shock.start < 900))) animation = requestAnimationFrame(draw)
     }
     const redraw = () => { cancelAnimationFrame(animation); draw() }
     const local = (event: PointerEvent) => { const rect = root.getBoundingClientRect(); return { x: event.clientX - rect.left, y: event.clientY - rect.top } }
